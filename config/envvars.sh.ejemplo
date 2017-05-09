@@ -1,0 +1,19 @@
+#!/bin/sh
+#sample enviroment, usar con source
+#ejemplo
+#  source configuracion/envvars.sh
+# debe ejecutarlo el usuario que accederá a config
+
+#base de datos principal
+#del servidor con los datos de usuario
+export PGHOST="localhost"
+export PGPORT="5432"
+export PGDATABASE="database"
+export PGUSER="usuario"
+export PGPASSWORD="clave"
+
+export PYTHONIOENCODING=utf-8
+
+#dirección y puerto del servidor WEB (api REST y pagina de reporte)
+export HOSTADDR=$(hostname) # -I
+export HOSTPORT=5000
