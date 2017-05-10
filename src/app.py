@@ -7,6 +7,7 @@ from __future__ import print_function
 from flask import Flask, render_template, Response
 from flask_restful import Api, Resource, reqparse
 
+import sys
 import logging
 from imutils.video import WebcamVideoStream
 import config
@@ -15,9 +16,23 @@ import cv2
 import time
 
 from conexion import Conexion
+from personal import Personal
 from face import FaceDetector
 from threading import Thread
-LOGGER = logging.getLogger(__name__)
+
+#configuración inicia de bitácora
+if __name__ == '__main__': #logging para los modulos
+    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s',datefmt='%Y-%m-%d %H:%M:%S', level=logging.DEBUG)
+    LOGGER = logging.getLogger(__name__)
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        """captura excepciones en la misma bitácora"""
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        LOGGER.error("Uncaught exception",
+                     exc_info=(exc_type, exc_value, exc_traceback))
+    sys.excepthook = handle_exception
+
 
 caputador = None
 
@@ -35,8 +50,67 @@ class CaptThread(Thread):
         self.img["camara"] = self.img["logo"] # para despliegue inicial
         self.img["inst"] = self.img["logo"]
         self.start()
+    def message(self, mestr):
+        """ Mensaje para el thread
+        Args:
+            mestr: mensaje
+        Returns:
+            self, la instancia misma para encadenar el wait()
+        """
+        self.mensaje_hilo.put(mestr)
+        return self #para encadenar el wait
+    #end message
+    def busy(self):
+        """ Capturador se encuentra ocupado.
+        Returns:
+            True si se encuentra realizando una tarea:
+                (registro, entrenamiento,etc)
+            False si se encuentra disponible en modo captura.
+        """
+        return bool(self.cnt["estado"] != 1)
+    #end busy
+    def wait(self): #todo, add timeout here?
+        """ Esperar al capturador.
+        bloquea esta ejecucion hasta que el capturador a finalizado sus tareas
+        pendientes (mediante el Queue generado por Capturador.message() )
+
+        Este método se debe llamar desde el thread principal si se quiere
+        esperar a finalizar una tarea, nunca llamar desde este mismo thread del
+        capturador ya que no le dará oportunidad de finalizar la tarea si se
+        autobloquea.
+        """
+        self.mensaje_hilo.join() # will block?
+        LOGGER.debug("Wait finnished!")
+    #end wait
+    def _cargar_rostros_archivo(self):
+        """ Inicia la carga del modelo de rostros. """
+        LOGGER.debug("Cargando Archivo de Entrenamiento")
+        if self.facedetector is None:
+            LOGGER.debug("sin entrenador")
+            return
+        if not self.facedetector.cargar_modelo():
+            LOGGER.debug("Falla de Archivo...")
+            self._entrenar_rostros()
+        else:
+            LOGGER.debug("Finalizado carga de Archivo")
+    def _entrenar_rostros(self):
+        """ Inicia un entrenamiento de Rostros. """
+        if self.facedetector is None:
+            LOGGER.debug("sin entrenador")
+            return
+        LOGGER.debug("Iniciando Entrenamiento de Rostros")
+        self.facedetector.limpiar_entrenamiento()
+        for i in Personal.usuarios:
+            usu = Personal.usuarios[i]
+            rostros = usu.obtener_rostros()
+            for rin in rostros:
+                #LOGGER.debug("adding face from user %i" % usu.pid) #funciona...
+                self.facedetector.agregar_entrenamiento(rostros[rin], usu.pid)
+        self.facedetector.entrenar()
+        LOGGER.debug("Finalizado Entrenamiento de Rostros")
+
     def run(self):
-        LOGGER.info("iniciando hilo captura");
+        LOGGER.info("iniciando hilo captura")
         while (True):
             time.sleep(0.5)
             #agregar aqui cambios para indetificacion y entrenamiento
@@ -153,6 +227,11 @@ if __name__ == '__main__':
     #print "iniciando conexion..."
     Conexion.iniciar()
     capturador = CaptThread()
+    brillo = int(Conexion.opcion('brillo',50))
+    capturador.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_BRIGHTNESS,brillo/100.0)
+    contraste = int(Conexion.opcion('contraste',50))
+    capturador.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_CONTRAST,contraste/100.0)
+
     APP.run(host='0.0.0.0', port=config.HOSTPORT, threaded=True)
 
 
