@@ -17,7 +17,7 @@ import logging
 import psycopg2
 
 import config
-#import personal
+import personal
 
 LOGGER = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class Conexion(object):
 
         Conexion._crear_estructura() # cuidado
         Conexion.identificador = Conexion.opcion("machine-name", "raspi")
-        #personal.Personal.conectar(es_servidor) # conexion propia
+        personal.Personal.conectar() # conexion propia
     #end iniciar
     @staticmethod
     def _crear_estructura():

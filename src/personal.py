@@ -1,5 +1,6 @@
 #!/opt/.virtualenvs/fingerprint/bin/python2
 # -*- coding: utf-8 -*-
+import sys 
 
 import logging
 import datetime
@@ -21,6 +22,38 @@ def is_number(cadena):
     except (ValueError, TypeError):
         return False
 
+def lista_usuarios():
+    """
+
+    Return:
+        Bool True si se logró con éxito o False si existió un error
+        (fallback a la base de datos)
+    """
+    usuarios = dict()
+    #buscar en la base de datos primero, todos deshabilitados por si acaso
+    LOGGER.info("Usuarios registrados en la base de datos.")
+    try:
+        with Personal.conn as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id,usuario,tipo,habilitado FROM personal ORDER BY id;")
+                for row in cur:
+                    #print "tiene usuario",row
+                    usuario = Personal(personal_id=row[0],usuario=row[1])
+                    #print "tiene instancia", usuario
+                    usuario.tipo_acceso=row[2]
+                    usuario.activo = True
+                    usuario.habilitado = row[3]
+                    usuarios[usuario.pid] = usuario
+    except psycopg2.Error:
+        LOGGER.debug("GenerarLista: %s", sys.exc_info()[0])
+        LOGGER.error("Pérdida de comunicación con BD principal!")
+        return False
+    Personal.usuarios = usuarios
+    LOGGER.info("Total: %i", len(usuarios))
+    print Personal.usuarios #con estos se trabajara
+    return True
+#end getUserList
+
 
 class Personal(object):
     """
@@ -34,7 +67,7 @@ class Personal(object):
     hashids = None #poblar en otro lado
 
     @staticmethod
-    def conectar(es_servidor=False):
+    def conectar():
         """
         Realizar la inicialización de la clase,
         obtener una(1) conexion a la base de datos
@@ -46,6 +79,7 @@ class Personal(object):
             config.PGUSER,
             config.PGPASSWORD)
         Personal.conn = psycopg2.connect(conn_string)
+        lista_usuarios()
     #end conectar
     @staticmethod
     def buscar(key=None, usuario=None, uid=0, solo_habilitados=False):
@@ -123,6 +157,24 @@ class Personal(object):
         root.num_huellas = 0 #no tiene nada..
         root.num_rostros = 0
         return root
+    def _init_from_bd(self):
+        """inicializa apartir del id en la base de datos"""
+        with Personal.conn as conn:
+            with conn.cursor() as cur:
+                #revisemos si existe en la base de datos
+                cur.execute("""
+                    SELECT COUNT(r.id)
+                    FROM personal p
+                    LEFT JOIN rostros r ON (p.id = r.personal_id)
+                    WHERE p.id = %s
+                    GROUP BY p.id;""", (self.pid,))
+
+                resp = cur.fetchone()
+                if resp is None and self.pid > 0:
+                    LOGGER.error("No existe rostros usuario con id %i", self.pid)
+                    return
+                self.num_rostros = resp[0]
+    #end _init_from_bd
 
     def __init__(self, personal_id=0, usuario=None, data=None):
         """
@@ -130,33 +182,26 @@ class Personal(object):
 
         Crea una instancia de una persona,
 
-        si se indica el id:
-            buscará la información en la base de datos y luego en LDAP
-        si se indica el usuario:
-            igualmente se buscará en la base de datos y luego LDAP
-        si se indica la data:
-            se asumirá como respuesta de la consulta LDAP
-
         Args:
-            personal_id: id de la persona a buscar
+            personal_id: id de la persona 
             usuario: nombre de usuario de la persona a instanciar
             data: dict{nombre, usuario, cargo} de una consulta ldap
         """
         self.pid = personal_id # reemplazar luego
-        self.usuario = "usuario"
-        self.nombre = "usuario"
+        self.usuario = usuario
+        self.nombre = usuario
         self.cargo = "sin cargo"
         self.carnet = "0"
         self.tipo_empleado = ""
         self.tipo_acceso = -1 #guest?
         self.rrhh = False #nunca!
-        self.num_huellas = 0
         self.num_rostros = 0
         self.activo = False #por defecto usuarios desactivador
         self.habilitado = False #por defecto usuarios deshabilitados
-        #calculos e inferencias adicionales:
-        if self.pid > Personal.maxFing:
-            Personal.maxFing = self.pid
+        if data:
+            self.fix_ldap(data)
+        if self.pid:
+            self._init_from_bd()
     #end __init__()
     def fix_ldap(self, data):
         """
@@ -187,6 +232,34 @@ class Personal(object):
             self.rrhh = True
             self.tipo_acceso = 2
     #end fix
+    def crear(self):
+        """guardar esta instancia en la BD"""
+        with Personal.conn as conn:
+            with conn.cursor() as cur:
+                hoy = datetime.datetime.today().replace(microsecond=0)
+                cur.execute("""
+                    INSERT INTO
+                    personal(usuario, tipo, ingreso, habilitado)
+                    VALUES(%s,%s,%s,%s)
+                    RETURNING id
+                    """, (self.usuario, self.tipo_acceso, hoy, True))
+                #redundante, pero colabora en la búsqueda:
+                self.pid = cur.fetchone()[0]
+                Personal.usuarios[self.pid] = self
+    #end crear
+    def guardar(self):
+        """guardar esta instancia en la BD"""
+        with Personal.conn as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE personal SET
+                    usuario = %s,
+                    tipo = %s,
+                    habilitado = %s
+                    where id = %s
+                    """, (self.usuario, self.tipo_acceso, self.habilitado,self.pid))
+                #redundante, pero colabora en la búsqueda:
+    #end guardar
     def habilitar(self):
         """habilita en la BD a un usario"""
         if not self.activo:
@@ -231,10 +304,7 @@ class Personal(object):
         return {"id":self.pid,
                 "usuario":self.usuario,
                 "nombre":self.nombre,
-                "cargo":self.cargo,
-                "huella":self.num_huellas,
                 "rostros":self.num_rostros,
-                "tipo_empleado":self.tipo_empleado,
                 "tipo_acceso":self.tipo_acceso,
                 "habilitado":self.habilitado,
                 "activo":self.activo}

@@ -14,9 +14,10 @@ import config
 import imutils
 import cv2
 import time
+import base64
 
 from conexion import Conexion
-from personal import Personal
+from personal import Personal, lista_usuarios
 from face import FaceDetector
 from threading import Thread
 
@@ -177,6 +178,119 @@ def gen():
 def video_feed():
     return Response(gen(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+class RestPersonal(Resource):
+    def get(self): # get /personal
+        return [Personal.usuarios[i].dict() for i in Personal.usuarios]
+    def post(self):
+        parser = reqparse.RequestParser()
+        parser.add_argument('usuario', required=True) #type=int,
+        parser.add_argument('tipo', type=int, required=True) #
+        args = parser.parse_args() # throws 400
+        usuario = Personal(personal_id=0, usuario=args['usuario'])
+        usuario.tipo_acceso = args['tipo']
+        usuario.activo = True
+        usuario.habilitado = True #hardcode
+        usuario.crear()
+        return usuario.dict()
+REST.add_resource(RestPersonal, '/personal')
+        
+class RestPersonalId(Resource):
+    def get(self,pid):
+        if pid in Personal.usuarios:
+            return  Personal.usuarios[pid].dict()
+        else: 
+            return {
+                "description": "no existe usuario",
+                "error": "Not Found",
+                "status_code": 404}, 404
+
+REST.add_resource(RestPersonalId,'/personal/<int:pid>')
+
+class RestRostros(Resource):
+    def get(self,pid):
+        parser = reqparse.RequestParser()
+        parser.add_argument('index', required=False, type=int, default=0)
+        args = parser.parse_args() # throws 400
+        index = args['index']
+
+        if pid in Personal.usuarios:
+            usuario = Personal.usuarios[pid]
+        else: 
+            return {
+                "description": "no existe usuario",
+                "error": "Not Found",
+                "status_code": 404}, 404
+        images = usuario.obtener_rostros()
+        if len(images) > 0:
+            if index >= 0:
+                if index >= len(images):
+                    index = len(images)-1
+                dummy, image = images.popitem()
+                for _ in range(index):
+                    dummy, image = images.popitem() #extra pop!
+                mempgm = cv2.imencode('.png', image)[1]
+                response = APP.make_response(mempgm.tostring()) #RAW
+                """response = APP.make_response(
+                    "data:image/png;base64,%s" %
+                    base64.b64encode(mempgm.tostring())) #to bytes antiguo"""
+                response.headers['content-type'] = 'image/png;base64'
+                return response
+            else: #responde un array(list)
+                response = dict()
+                for i in images:
+                    mempgm = cv2.imencode('.png', images[i])[1]
+                    response[i] = (
+                        "data:image/png;base64,%s" %
+                        base64.b64encode(mempgm.tostring()))
+                return response
+        else:
+            return {
+                "description": "no existen rostros registrados",
+                "error": "Empty",
+                "status_code": 204}, 204
+    def post(self, pid):
+        if pid in Personal.usuarios:
+            usuario = Personal.usuarios[pid]
+        else: 
+            return {
+                "description": "no existe usuario",
+                "error": "Not Found",
+                "status_code": 404}, 404
+        capturador.facedetector.last["error"] = -1
+        time.sleep(5)
+        ready = False
+        for i in range(30):
+            if ready:
+                continue
+            if capturador.facedetector.last["error"] == 0:
+                usuario.guardar_rostro(capturador.facedetector.last["rostro"])
+                ready = True
+            time.sleep(0.5)
+        if not ready:
+            return {
+                "description": "no se encontró un rostro valido",
+                "error": "Internal Error",
+                "status_code": 500}, 500
+        #sino entrenar
+        return {
+            "description": "rostro registrado",
+            "error": "OK",
+            "status_code": 200}, 200
+    def delete(self,pid):
+        if pid in Personal.usuarios:
+            usuario = Personal.usuarios[pid]
+        else: 
+            return {
+                "description": "no existe usuario",
+                "error": "Not Found",
+                "status_code": 404}, 404
+        usuario.borrar_rostros_persona()
+        return {
+            "description": "rostros eliminados",
+            "error": "Empty",
+            "status_code": 204}, 204
+REST.add_resource(RestRostros,'/personal/<int:pid>/rostros')
 
 class RestBrillo(Resource):
     def get(self):
