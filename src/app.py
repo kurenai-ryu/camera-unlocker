@@ -8,6 +8,8 @@ from flask import Flask, render_template, Response
 from flask_restful import Api, Resource, reqparse
 
 import sys
+import os
+import wiringpi
 import logging
 from imutils.video import WebcamVideoStream
 import config
@@ -19,7 +21,9 @@ import base64
 from conexion import Conexion
 from personal import Personal, lista_usuarios
 from face import FaceDetector
-from threading import Thread
+from threading import Thread, Timer
+import gpio
+
 
 #configuración inicia de bitácora
 if __name__ == '__main__': #logging para los modulos
@@ -45,7 +49,6 @@ class CaptThread(Thread):
         super(CaptThread, self).__init__(name="CaptThread", args=())
         self.setDaemon(True) #it's still dependant of mainthread
         self.facedetector = FaceDetector()
-        self.facedetector.camera = WebcamVideoStream(src=0).start()
         self.img = dict() #las imagenes cv2 (numpy) como tal
         self.img["logo"] = cv2.imread('templates/logo.jpg') 
         self.img["camara"] = self.img["logo"] # para despliegue inicial
@@ -131,7 +134,24 @@ class CaptThread(Thread):
                                   (posx1, posy1), (posx2, posy2),
                                   (255, 255, 0), 2) # hardcoded by now
                 self.facedetector.finish = False
-        LOGGER.error("finalizado hilo!!!");
+        LOGGER.error("finalizado hilo!!!")
+    #end run
+    def empezar(self,brillo,contraste):
+        self.facedetector.camera = WebcamVideoStream(src=0).start()
+        self.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_BRIGHTNESS,brillo/100.0)
+        self.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_CONTRAST,contraste/100.0)
+    #end empezar
+    def entrenamiento_inicial(self):
+        LOGGER.info("Iniciando carga de imagenes")
+        self.facedetector.limpiar_entrenamiento()
+        for pid in Personal.usuarios:
+            rostros = Personal.usuarios[pid].obtener_rostros()
+            for r in rostros:
+                self.facedetector.agregar_entrenamiento(rostros[r], pid)
+        LOGGER.info("Iniciando entrenamiento")
+        self.facedetector.entrenar()
+        LOGGER.info("Entrenamiento Finalizado.")
+    #end cargar_datos
 
 """class VideoCamera(object):
     def __init__(self):
@@ -258,21 +278,35 @@ class RestRostros(Resource):
                 "error": "Not Found",
                 "status_code": 404}, 404
         capturador.facedetector.last["error"] = -1
+        capturador.empezar(int(Conexion.opcion('brillo',50)),int(Conexion.opcion('contraste',50)))
+        gpio.on(gpio.LED_ROJO)
         time.sleep(5)
+        gpio.off(gpio.LED_ROJO)
+        gpio.on(gpio.LED_AMARILLO)
         ready = False
-        for i in range(30):
+        for i in range(60):
             if ready:
                 continue
             if capturador.facedetector.last["error"] == 0:
                 usuario.guardar_rostro(capturador.facedetector.last["rostro"])
                 ready = True
+                continue
             time.sleep(0.5)
+        capturador.facedetector.camera.stop()
+        time.sleep(0.1)
+        capturador.facedetector.camera=None
+        gpio.off(gpio.LED_AMARILLO)
         if not ready:
+            gpio.on(gpio.LED_ROJO)
+            Timer(5,gpio.leds_off).start()
             return {
                 "description": "no se encontró un rostro valido",
                 "error": "Internal Error",
                 "status_code": 500}, 500
         #sino entrenar
+        capturador.entrenamiento_inicial()
+        gpio.on(gpio.LED_VERDE)
+        Timer(5,gpio.leds_off).start()
         return {
             "description": "rostro registrado",
             "error": "OK",
@@ -286,22 +320,70 @@ class RestRostros(Resource):
                 "error": "Not Found",
                 "status_code": 404}, 404
         usuario.borrar_rostros_persona()
+        capturador.entrenamiento_inicial()
         return {
             "description": "rostros eliminados",
             "error": "Empty",
             "status_code": 204}, 204
 REST.add_resource(RestRostros,'/personal/<int:pid>/rostros')
 
+
+class RestBuscador(Resource):
+    def get(self):
+        pid = 0
+        capturador.facedetector.last["error"] = -1
+        capturador.empezar(int(Conexion.opcion('brillo',50)),int(Conexion.opcion('contraste',50)))
+        gpio.leds_off() #jic
+        gpio.on(gpio.LED_ROJO)
+        time.sleep(5)
+        gpio.off(gpio.LED_ROJO)
+        gpio.on(gpio.LED_AMARILLO)
+        capturador.facedetector.last["id"] = -1
+        capturador.facedetector.search = True
+        ready = False
+        for i in range(60):
+            if ready:
+                continue
+            if capturador.facedetector.lat["id"] > 0: #from bd 1 or more
+                pid = capturador.facedetector.last["id"]
+                print ("encontradoo!!!!", pid)
+                ready = True
+                continue
+            time.sleep(0.5)
+        gpio.off(gpio.LED_AMARILLO)
+        capturador.facedetector.search = False
+        capturador.facedetector.camera.stop()
+        time.sleep(0.1)
+        capturador.facedetector.camera=None
+        if not ready:
+            gpio.on(gpio.LED_ROJO)
+            Timer(5,gpio.leds_off).start()
+            return {
+                "description": "no se encontró un rostro valido",
+                "error": "Internal Error",
+                "status_code": 500}, 500
+        #sino identificar
+        gpio.on(gpio.LED_VERDE)
+        gpio.on(gpio.RELE)
+        Timer(15,gpio.leds_off).start()
+        return {
+            "description": "rostro identificado",
+            "usuario":Personal.usuarios[pid].dict(),
+            "error": "OK",
+            "status_code": 200}, 200
+REST.add_resource(RestBuscador,'/buscar')
+
 class RestBrillo(Resource):
     def get(self):
-        print ("CV_CAP_PROP_BRIGHTNESS",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_BRIGHTNESS))
-        print ("CV_CAP_PROP_CONTRAST",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_CONTRAST))
-        print ("CV_CAP_PROP_SATURATION",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_SATURATION))
-        print ("CV_CAP_PROP_HUE",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_HUE))
-        print ("CV_CAP_PROP_GAIN",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_GAIN))
-        print ("CV_CAP_PROP_EXPOSURE",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_EXPOSURE))
-        print ("CV_CAP_PROP_FRAME_WIDTH",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH))
-        print ("CV_CAP_PROP_FRAME_HEIGHT",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT))
+        if capturador.facedetector.camera:
+            print ("CV_CAP_PROP_BRIGHTNESS",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_BRIGHTNESS))
+            print ("CV_CAP_PROP_CONTRAST",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_CONTRAST))
+            print ("CV_CAP_PROP_SATURATION",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_SATURATION))
+            print ("CV_CAP_PROP_HUE",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_HUE))
+            print ("CV_CAP_PROP_GAIN",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_GAIN))
+            print ("CV_CAP_PROP_EXPOSURE",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_EXPOSURE))
+            print ("CV_CAP_PROP_FRAME_WIDTH",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH))
+            print ("CV_CAP_PROP_FRAME_HEIGHT",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT))
         return int(Conexion.opcion('brillo',50))
     def post(self):
         parser = reqparse.RequestParser()
@@ -310,20 +392,22 @@ class RestBrillo(Resource):
         brillo = args['valor']
         print ("post algo?", brillo)
         Conexion.escribir_opcion('brillo',brillo)
-        capturador.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_BRIGHTNESS,brillo/100.0)
+        if capturador.facedetector.camera:
+            capturador.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_BRIGHTNESS,brillo/100.0)
         return int(Conexion.opcion('brillo',50))
 REST.add_resource(RestBrillo, '/brillo')
 
 class RestContraste(Resource):
     def get(self):
-        print ("CV_CAP_PROP_BRIGHTNESS",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_BRIGHTNESS))
-        print ("CV_CAP_PROP_CONTRAST",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_CONTRAST))
-        print ("CV_CAP_PROP_SATURATION",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_SATURATION))
-        print ("CV_CAP_PROP_HUE",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_HUE))
-        print ("CV_CAP_PROP_GAIN",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_GAIN))
-        print ("CV_CAP_PROP_EXPOSURE",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_EXPOSURE))
-        print ("CV_CAP_PROP_FRAME_WIDTH",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH))
-        print ("CV_CAP_PROP_FRAME_HEIGHT",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT))
+        if capturador.facedetector.camera:
+            print ("CV_CAP_PROP_BRIGHTNESS",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_BRIGHTNESS))
+            print ("CV_CAP_PROP_CONTRAST",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_CONTRAST))
+            print ("CV_CAP_PROP_SATURATION",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_SATURATION))
+            print ("CV_CAP_PROP_HUE",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_HUE))
+            print ("CV_CAP_PROP_GAIN",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_GAIN))
+            print ("CV_CAP_PROP_EXPOSURE",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_EXPOSURE))
+            print ("CV_CAP_PROP_FRAME_WIDTH",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH))
+            print ("CV_CAP_PROP_FRAME_HEIGHT",capturador.facedetector.camera.stream.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT))
         return int(Conexion.opcion('contraste',50))
     def post(self):
         parser = reqparse.RequestParser()
@@ -332,20 +416,18 @@ class RestContraste(Resource):
         contraste = args['valor']
         print ("post algo?", contraste)
         Conexion.escribir_opcion('contraste',contraste)
-        capturador.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_CONTRAST,contraste/100.0)
+        if capturador.facedetector.camera:
+            capturador.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_CONTRAST,contraste/100.0)
         return int(Conexion.opcion('contraste',50))
 REST.add_resource(RestContraste, '/contraste') # get JWT
+
 
 
 if __name__ == '__main__':
     #print "iniciando conexion..."
     Conexion.iniciar()
     capturador = CaptThread()
-    brillo = int(Conexion.opcion('brillo',50))
-    capturador.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_BRIGHTNESS,brillo/100.0)
-    contraste = int(Conexion.opcion('contraste',50))
-    capturador.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_CONTRAST,contraste/100.0)
-
+    capturador.entrenamiento_inicial()
     APP.run(host='0.0.0.0', port=config.HOSTPORT, threaded=True)
 
 

@@ -4,6 +4,7 @@
 import sys
 import logging
 import os
+
 from threading import Thread
 #import Queue
 import math
@@ -308,7 +309,11 @@ class FaceDetector(Thread):
             #print 'No se encontro un rostro valido!'
             return -1, None, None
         #x, y, w, h = rostro
+        if rostro[3] < 100:
+            #print 'ronstro muy pequeño!'
+            return -1, None, None
         crp = recortar(image, rostro[0], rostro[1], rostro[2], rostro[3])
+
         return 0, reajustar(crp), rostro
         #end
         indface = image[rostro[1]:rostro[1]+rostro[3],

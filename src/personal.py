@@ -322,7 +322,9 @@ class Personal(object):
                 cur.execute("""
                     SELECT id, rostro_imagen
                     FROM rostros
-                    WHERE personal_id=%s;""", (self.pid,))
+                    WHERE personal_id=%s 
+                    ORDER BY id 
+                    """, (self.pid,))
                 for res in cur:
                     rostros[res[0]] = cv2.imdecode(
                         np.frombuffer(res[1], np.uint8), 0)
