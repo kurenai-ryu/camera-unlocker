@@ -182,8 +182,8 @@ class Buttons(Thread):
             #print ("intento SW1", gpio.read(gpio.SW1));
             #print ("intento SW2", gpio.read(gpio.SW2));
             if not capturador.working  and not gpio.read(gpio.SW1):
-                #r = requests.post('http://localhost:%i/personal/1/rostros' % config.HOSTPORT)
-                LOGGER.info("respuesta SW1")
+                r = requests.post('http://localhost:%i/personal/1/rostros' % config.HOSTPORT)
+                LOGGER.info("respuesta SW1 registrar")
                 #LOGGER.debug(r)
             elif not capturador.working  and not gpio.read(gpio.SW2):
                 r = requests.get('http://localhost:%i/buscar' % config.HOSTPORT)

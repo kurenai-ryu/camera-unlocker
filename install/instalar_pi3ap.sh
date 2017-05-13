@@ -62,7 +62,7 @@ else
 fi
 export AP_DHCP_1=$(echo $AP_ADDRESS|cut -d"." -f1-3).50
 export AP_DHCP_2=$(echo $AP_ADDRESS|cut -d"." -f1-3).150
-echo -e "interface=${AP_INTERFACE}\nlisten-address=${AP_ADDRESS}\naddress=/#/${AP_ADDRESS}\nbind-interfaces\nserver=8.8.8.8\ndomain-needed\nbogus-priv\ndhcp-range=${AP_DHCP_1},${AP_DHCP_2},12h" | sudo tee /etc/dnsmasq.conf
+echo -e "interface=${AP_INTERFACE}\nlisten-address=${AP_ADDRESS}\nbind-interfaces\nserver=8.8.8.8\ndomain-needed\nbogus-priv\ndhcp-range=${AP_DHCP_1},${AP_DHCP_2},12h" | sudo tee /etc/dnsmasq.conf
 
 if $(sudo grep -q "After=" /lib/systemd/system/dnsmasq.service); then
   echo "ya modificado el After"
@@ -90,7 +90,7 @@ sudo sed -i 's|#net.ipv4.ip_forward=.*|net.ipv4.ip_forward=1|'  /etc/sysctl.conf
 sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
 sudo iptables -A FORWARD -i eth0 -o wlan0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 sudo iptables -A FORWARD -i wlan0 -o eth0 -j ACCEPT
-sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-port ${HOSTPORT}
+sudo iptables -t nat -A PREROUTING -i wlan0 -p tcp --dport 80 -j REDIRECT --to-port ${HOSTPORT}
 #sudo iptables-t mangle-N internet iptables-t mangle-A PREROUTING-i wlan0-p tcp-m tcp--dport 80 -j internet iptables-t mangle-A internet-j MARK--set-mark 99
 #sudo iptables -t nat -A PREROUTING -i wlan0 -p tcp -m mark --mark 99 -m tcp --dport 80 -j DNAT --to-destination 192.168.10.1
 sudo sh -c "iptables-save > /etc/iptables.ipv4.nat"
@@ -99,5 +99,5 @@ if $(sudo grep -q "iptables-restore" /etc/rc.local ); then
 else
   sudo sed -i "s|exit 0|iptables-restore < /etc/iptables.ipv4.nat\nexit 0|" /etc/rc.local
 fi
-sudo apt-get install iptables-persistent #al ultimo para guardar!
+sudo apt-get install iptables-persistent -y #al ultimo para guardar!
 
