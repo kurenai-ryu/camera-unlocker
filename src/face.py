@@ -251,6 +251,7 @@ class FaceDetector(Thread):
             return 0, coef #if predict was valid but not enough coef...
         if uid < 0: #por si acaso, filtrar posibles entrenamientos negativos
             return 0, config.POSITIVE_THRESHOLD*2
+        LOGGER.info("face: exito %s, coef: %s ", uid, coef)
         return uid, coef
     #end predecir
     def run(self):
@@ -313,7 +314,7 @@ class FaceDetector(Thread):
             #print 'ronstro muy pequeño!'
             return -1, None, None
         crp = recortar(image, rostro[0], rostro[1], rostro[2], rostro[3])
-
+        #crp = cv2.equalizeHist(crp)
         return 0, reajustar(crp), rostro
         #end
         indface = image[rostro[1]:rostro[1]+rostro[3],

@@ -1,5 +1,6 @@
 config/envvars.sh
 training.xml
+src/www/lib/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

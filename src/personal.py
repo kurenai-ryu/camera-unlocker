@@ -260,13 +260,17 @@ class Personal(object):
                     """, (self.usuario, self.tipo_acceso, self.habilitado,self.pid))
                 #redundante, pero colabora en la búsqueda:
     #end guardar
+    def borrar(self):
+        del Personal.usuarios[self.pid]
+        with Personal.conn as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM personal 
+                    where id = %s
+                    """, (self.pid,))
+    #end borrar
     def habilitar(self):
         """habilita en la BD a un usario"""
-        if not self.activo:
-            LOGGER.error(
-                "no se puede habilitar usuario desactivado en LDAP: %s",
-                self.usuario)
-            return
         with Personal.conn as conn:
             with conn.cursor() as cur:
                 LOGGER.info("habilitando usuario %s", self.usuario)
@@ -344,11 +348,13 @@ class Personal(object):
                 mempng = cv2.imencode('.png', imagen_fc)[1]
                 cur.execute("""
                     INSERT INTO rostros(personal_id, rostro_imagen, fechahora)
-                    VALUES(%s,%s,%s);""", (
+                    VALUES(%s,%s,%s) RETURNING id;""", (
                         self.pid, psycopg2.Binary(mempng), hoy))
+                rostro_id = cur.fetchone()[0]
             conn.commit()
         self.num_rostros += 1
         #debemos guardar la imagen también en archivo?
+        return rostro_id
     #end guardar_rostro
     def guardar_rostro_temporal(self, image_fc):
         """

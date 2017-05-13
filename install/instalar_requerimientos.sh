@@ -8,6 +8,7 @@ sudo apt-get install python-psycopg2 -y
 sudo pip install flask_restful
 #http://www.pyimagesearch.com/2015/12/21/increasing-webcam-fps-with-python-and-opencv/
 sudo pip install imutils
+sudo pip install requests
 
 #fix a wiring-pi python
 sudo apt-get install swig2.0 -y

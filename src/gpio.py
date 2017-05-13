@@ -11,6 +11,7 @@ funciones PIR
 import logging
 import os
 import wiringpi
+import time
 
 LOGGER = logging.getLogger(__name__)
 LED_ROJO = 14 
@@ -51,4 +52,11 @@ os.system("gpio export %i out > /dev/null 2>&1" % RELE) #verde
 
 res = wiringpi.wiringPiSetupSys()
 LOGGER.debug("Configuración GPIO  0=sin error -> %i", res)
+leds_off()
+on(LED_ROJO)
+time.sleep(0.1)
+on(LED_AMARILLO)	
+time.sleep(0.1)
+on(LED_VERDE)
+time.sleep(0.1)	
 leds_off()

@@ -23,6 +23,7 @@ from personal import Personal, lista_usuarios
 from face import FaceDetector
 from threading import Thread, Timer
 import gpio
+import requests
 
 
 #configuración inicia de bitácora
@@ -50,9 +51,10 @@ class CaptThread(Thread):
         self.setDaemon(True) #it's still dependant of mainthread
         self.facedetector = FaceDetector()
         self.img = dict() #las imagenes cv2 (numpy) como tal
-        self.img["logo"] = cv2.imread('templates/logo.jpg') 
+        self.img["logo"] = cv2.imread('src/templates/logo.jpg') 
         self.img["camara"] = self.img["logo"] # para despliegue inicial
         self.img["inst"] = self.img["logo"]
+        self.working = False
         self.start()
     def message(self, mestr):
         """ Mensaje para el thread
@@ -71,7 +73,7 @@ class CaptThread(Thread):
                 (registro, entrenamiento,etc)
             False si se encuentra disponible en modo captura.
         """
-        return bool(self.cnt["estado"] != 1)
+        return self.working
     #end busy
     def wait(self): #todo, add timeout here?
         """ Esperar al capturador.
@@ -137,10 +139,25 @@ class CaptThread(Thread):
         LOGGER.error("finalizado hilo!!!")
     #end run
     def empezar(self,brillo,contraste):
+        self.working = True
         self.facedetector.camera = WebcamVideoStream(src=0).start()
         self.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_BRIGHTNESS,brillo/100.0)
         self.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_CONTRAST,contraste/100.0)
+        gpio.leds_off() #jic
+        gpio.on(gpio.LED_ROJO)
+        time.sleep(1.5)
+        gpio.off(gpio.LED_ROJO)
+        gpio.on(gpio.LED_AMARILLO)
+        self.facedetector.last["error"] = -1
+        capturador.facedetector.last["id"] = -1
     #end empezar
+    def terminar(self):
+        gpio.off(gpio.LED_AMARILLO)
+        self.facedetector.camera.stop()
+        time.sleep(0.1)
+        self.facedetector.camera = None
+        self.working = False
+    #end terminar
     def entrenamiento_inicial(self):
         LOGGER.info("Iniciando carga de imagenes")
         self.facedetector.limpiar_entrenamiento()
@@ -152,6 +169,27 @@ class CaptThread(Thread):
         self.facedetector.entrenar()
         LOGGER.info("Entrenamiento Finalizado.")
     #end cargar_datos
+
+class Buttons(Thread):
+    def __init__(self):
+        super(Buttons, self).__init__(name="Buttons", args=())
+        self.setDaemon(True) #it's still dependant of mainthread
+        self.start()
+    def run (self):
+        LOGGER.info("esperando botones")
+        while (True):
+            time.sleep(0.2)
+            #print ("intento SW1", gpio.read(gpio.SW1));
+            #print ("intento SW2", gpio.read(gpio.SW2));
+            if not capturador.working  and not gpio.read(gpio.SW1):
+                #r = requests.post('http://localhost:%i/personal/1/rostros' % config.HOSTPORT)
+                LOGGER.info("respuesta SW1")
+                #LOGGER.debug(r)
+            elif not capturador.working  and not gpio.read(gpio.SW2):
+                r = requests.get('http://localhost:%i/buscar' % config.HOSTPORT)
+                LOGGER.info("respuesta SW2 buscar")
+                #LOGGER.debug(r)
+
 
 """class VideoCamera(object):
     def __init__(self):
@@ -178,7 +216,7 @@ class CaptThread(Thread):
 
 print ("starting flask def...")
 
-APP = Flask(__name__)
+APP = Flask(__name__,static_folder="./www", static_url_path='')
 REST = Api(APP)
 
 @APP.route('/')
@@ -213,10 +251,11 @@ class RestPersonal(Resource):
         usuario.habilitado = True #hardcode
         usuario.crear()
         return usuario.dict()
+
 REST.add_resource(RestPersonal, '/personal')
         
 class RestPersonalId(Resource):
-    def get(self,pid):
+    def get(self, pid):
         if pid in Personal.usuarios:
             return  Personal.usuarios[pid].dict()
         else: 
@@ -224,15 +263,52 @@ class RestPersonalId(Resource):
                 "description": "no existe usuario",
                 "error": "Not Found",
                 "status_code": 404}, 404
-
+    def put(self, pid):
+        if pid in Personal.usuarios:
+            usuario = Personal.usuarios[pid]
+        else: 
+            return {
+                "description": "no existe usuario",
+                "error": "Not Found",
+                "status_code": 404}, 404
+        parser = reqparse.RequestParser()
+        parser.add_argument('habilitado', required=True, type=int, default=0)
+        args = parser.parse_args() # throws 400
+        habilitado = args['habilitado']
+        if habilitado:
+            usuario.habilitar()
+        else:
+            usuario.deshabilitar()
+        return {
+            "description": "rostro actualizado",
+            "hab":habilitado,
+            "error": "OK",
+            "status_code": 200}, 200
+    def delete(self, pid):
+        if pid in Personal.usuarios:
+            usuario = Personal.usuarios[pid]
+        else: 
+            return {
+                "description": "no existe usuario",
+                "error": "Not Found",
+                "status_code": 404}, 404
+        usuario.borrar_rostros_persona()
+        usuario.borrar()
+        capturador.entrenamiento_inicial()
+        return {
+            "description": "rostro eliminado",
+            "error": "Empty",
+            "status_code": 204}, 204
 REST.add_resource(RestPersonalId,'/personal/<int:pid>')
 
 class RestRostros(Resource):
     def get(self,pid):
         parser = reqparse.RequestParser()
         parser.add_argument('index', required=False, type=int, default=0)
+        parser.add_argument('id', required=False, type=int, default=0)
         args = parser.parse_args() # throws 400
         index = args['index']
+        rostro_id = args['id']
 
         if pid in Personal.usuarios:
             usuario = Personal.usuarios[pid]
@@ -243,7 +319,16 @@ class RestRostros(Resource):
                 "status_code": 404}, 404
         images = usuario.obtener_rostros()
         if len(images) > 0:
-            if index >= 0:
+            if rostro_id > 0 and rostro_id in images:
+                image =images[rostro_id]
+                mempgm = cv2.imencode('.png', image)[1]
+                response = APP.make_response(mempgm.tostring()) #RAW
+                """response = APP.make_response(
+                    "data:image/png;base64,%s" %
+                    base64.b64encode(mempgm.tostring())) #to bytes antiguo"""
+                response.headers['content-type'] = 'image/png'
+                return response
+            elif index >= 0:
                 if index >= len(images):
                     index = len(images)-1
                 dummy, image = images.popitem()
@@ -254,7 +339,7 @@ class RestRostros(Resource):
                 """response = APP.make_response(
                     "data:image/png;base64,%s" %
                     base64.b64encode(mempgm.tostring())) #to bytes antiguo"""
-                response.headers['content-type'] = 'image/png;base64'
+                response.headers['content-type'] = 'image/png'
                 return response
             else: #responde un array(list)
                 response = dict()
@@ -270,6 +355,12 @@ class RestRostros(Resource):
                 "error": "Empty",
                 "status_code": 204}, 204
     def post(self, pid):
+        """Entrenar rostro"""
+        if capturador.working:
+            return {
+                "description": "sistema ocupado",
+                "error": "Locked",
+                "status_code": 423}, 423
         if pid in Personal.usuarios:
             usuario = Personal.usuarios[pid]
         else: 
@@ -277,28 +368,21 @@ class RestRostros(Resource):
                 "description": "no existe usuario",
                 "error": "Not Found",
                 "status_code": 404}, 404
-        capturador.facedetector.last["error"] = -1
         capturador.empezar(int(Conexion.opcion('brillo',50)),int(Conexion.opcion('contraste',50)))
-        gpio.on(gpio.LED_ROJO)
-        time.sleep(5)
-        gpio.off(gpio.LED_ROJO)
-        gpio.on(gpio.LED_AMARILLO)
         ready = False
+        rostro_id = 0
         for i in range(60):
             if ready:
                 continue
             if capturador.facedetector.last["error"] == 0:
-                usuario.guardar_rostro(capturador.facedetector.last["rostro"])
+                rostro_id = usuario.guardar_rostro(capturador.facedetector.last["rostro"])
                 ready = True
                 continue
             time.sleep(0.5)
-        capturador.facedetector.camera.stop()
-        time.sleep(0.1)
-        capturador.facedetector.camera=None
-        gpio.off(gpio.LED_AMARILLO)
+        capturador.terminar()
         if not ready:
             gpio.on(gpio.LED_ROJO)
-            Timer(5,gpio.leds_off).start()
+            Timer(3,gpio.leds_off).start()
             return {
                 "description": "no se encontró un rostro valido",
                 "error": "Internal Error",
@@ -306,12 +390,21 @@ class RestRostros(Resource):
         #sino entrenar
         capturador.entrenamiento_inicial()
         gpio.on(gpio.LED_VERDE)
-        Timer(5,gpio.leds_off).start()
+        gpio.on(gpio.RELE)
+        Timer(2,gpio.leds_off).start()
         return {
             "description": "rostro registrado",
+            "id":rostro_id,
             "error": "OK",
             "status_code": 200}, 200
     def delete(self,pid):
+        parser = reqparse.RequestParser()
+        parser.add_argument('index', required=False, type=int, default=0)
+        parser.add_argument('id', required=False, type=int, default=0)
+        args = parser.parse_args() # throws 400
+        index = args['index'] #not used - jic
+        rostro_id = args['id']
+
         if pid in Personal.usuarios:
             usuario = Personal.usuarios[pid]
         else: 
@@ -319,6 +412,13 @@ class RestRostros(Resource):
                 "description": "no existe usuario",
                 "error": "Not Found",
                 "status_code": 404}, 404
+        if rostro_id > 0:
+            usuario.borrar_rostro(rostro_id)
+            capturador.entrenamiento_inicial()
+            return {
+                "description": "rostro #%i eliminado" % rostro_id,
+                "error": "Empty",
+                "status_code": 204}, 204
         usuario.borrar_rostros_persona()
         capturador.entrenamiento_inicial()
         return {
@@ -330,47 +430,52 @@ REST.add_resource(RestRostros,'/personal/<int:pid>/rostros')
 
 class RestBuscador(Resource):
     def get(self):
+        if capturador.working:
+            return {
+                "description": "sistema ocupado",
+                "error": "Locked",
+                "status_code": 423}, 423
         pid = 0
-        capturador.facedetector.last["error"] = -1
+        parser = reqparse.RequestParser()
+        parser.add_argument('segundos', required=False, type=int, default=60)
+        args = parser.parse_args() # throws 400
+        segundos = args['segundos']
+
         capturador.empezar(int(Conexion.opcion('brillo',50)),int(Conexion.opcion('contraste',50)))
-        gpio.leds_off() #jic
-        gpio.on(gpio.LED_ROJO)
-        time.sleep(5)
-        gpio.off(gpio.LED_ROJO)
-        gpio.on(gpio.LED_AMARILLO)
-        capturador.facedetector.last["id"] = -1
         capturador.facedetector.search = True
         ready = False
-        for i in range(60):
+        for i in range(segundos):
             if ready:
                 continue
-            if capturador.facedetector.lat["id"] > 0: #from bd 1 or more
+            if capturador.facedetector.last["id"] > 0: #from bd 1 or more
                 pid = capturador.facedetector.last["id"]
                 print ("encontradoo!!!!", pid)
                 ready = True
                 continue
             time.sleep(0.5)
-        gpio.off(gpio.LED_AMARILLO)
         capturador.facedetector.search = False
-        capturador.facedetector.camera.stop()
-        time.sleep(0.1)
-        capturador.facedetector.camera=None
-        if not ready:
-            gpio.on(gpio.LED_ROJO)
-            Timer(5,gpio.leds_off).start()
-            return {
-                "description": "no se encontró un rostro valido",
-                "error": "Internal Error",
-                "status_code": 500}, 500
+        capturador.terminar()
         #sino identificar
-        gpio.on(gpio.LED_VERDE)
-        gpio.on(gpio.RELE)
-        Timer(15,gpio.leds_off).start()
+        if  ready and (pid in Personal.usuarios):
+            usuario = Personal.usuarios[pid]
+            if usuario.habilitado:            
+                gpio.on(gpio.LED_VERDE)
+                gpio.on(gpio.RELE)
+                Timer(10,gpio.leds_off).start()
+                return {
+                    "description": "rostro identificado",
+                    "usuario":Personal.usuarios[pid].dict(),
+                    "error": "OK",
+                    "status_code": 200}, 200
+            else:
+                LOGGER.warn("usuario bloqueado, omitiendo...")
+        gpio.on(gpio.LED_ROJO)
+        Timer(5,gpio.leds_off).start()
         return {
-            "description": "rostro identificado",
-            "usuario":Personal.usuarios[pid].dict(),
-            "error": "OK",
-            "status_code": 200}, 200
+            "description": "no se encontró un rostro valido",
+            "error": "Internal Error",
+            "status_code": 500}, 500
+
 REST.add_resource(RestBuscador,'/buscar')
 
 class RestBrillo(Resource):
@@ -390,7 +495,6 @@ class RestBrillo(Resource):
         parser.add_argument('valor', required=True, type=int) 
         args = parser.parse_args() # throws 400
         brillo = args['valor']
-        print ("post algo?", brillo)
         Conexion.escribir_opcion('brillo',brillo)
         if capturador.facedetector.camera:
             capturador.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_BRIGHTNESS,brillo/100.0)
@@ -414,7 +518,6 @@ class RestContraste(Resource):
         parser.add_argument('valor', required=True, type=int) 
         args = parser.parse_args() # throws 400
         contraste = args['valor']
-        print ("post algo?", contraste)
         Conexion.escribir_opcion('contraste',contraste)
         if capturador.facedetector.camera:
             capturador.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_CONTRAST,contraste/100.0)
@@ -428,6 +531,7 @@ if __name__ == '__main__':
     Conexion.iniciar()
     capturador = CaptThread()
     capturador.entrenamiento_inicial()
+    Buttons() # corre solito!
     APP.run(host='0.0.0.0', port=config.HOSTPORT, threaded=True)
 
 

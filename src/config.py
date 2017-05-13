@@ -48,7 +48,7 @@ FACE_HEIGHT = 112
 
 # Umbral de confianza del modelo, depende mucho del tipo de modelo,
 # cuanto mas cercano a 0, el modelo es mas exacto.
-POSITIVE_THRESHOLD = 55.0
+POSITIVE_THRESHOLD = 100.0 #elias test
 
 # Archivo para guardar el modelo entrenado!
 TRAINING_FILE = 'training.xml'

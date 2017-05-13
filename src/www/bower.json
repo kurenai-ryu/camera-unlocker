@@ -1,0 +1,32 @@
+{
+  "name": "camera_unlocker",
+  "description": "desbloqueo mediante camara",
+  "main": "index.js",
+  "authors": [
+    "Arturo Hernandez Calleja"
+  ],
+  "license": "ISC",
+  "keywords": [
+    "raspberry",
+    "arduino",
+    "mqtt",
+    "node",
+    "restify"
+  ],
+  "homepage": "",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "highcharts": "highcharts-release#^5.0.7",
+    "jquery": "^3.1.1",
+    "materialize": "^0.98.0",
+    "material-design-icons": "^3.0.1",
+    "socket.io-client": "^1.7.2",
+    "moment": "^2.17.1"
+  }
+}
