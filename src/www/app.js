@@ -1,5 +1,5 @@
 function poblarUsuarios(){
-  var empezando=True
+  var empezando=true;
   $.get("/personal").then(function(personal){
     if (personal.length) $("#usuarios").empty();
     personal.forEach(function(p){
@@ -17,6 +17,7 @@ function poblarUsuarios(){
       `); //<a class="btn" id="reg_${p.id}">Borrar Fotos</a>
       if (empezando){
         $(`#del_${p.id}`).remove();
+        empezando = false;
       } else {
         $(`#del_${p.id}`).off('click').click(function(){
           $.ajax({
