@@ -145,7 +145,7 @@ class CaptThread(Thread):
         self.facedetector.camera.stream.set(cv2.cv.CV_CAP_PROP_CONTRAST,contraste/100.0)
         gpio.leds_off() #jic
         gpio.on(gpio.LED_ROJO)
-        time.sleep(1.5)
+        time.sleep(3)
         gpio.off(gpio.LED_ROJO)
         gpio.on(gpio.LED_AMARILLO)
         self.facedetector.last["error"] = -1
@@ -221,7 +221,8 @@ REST = Api(APP)
 
 @APP.route('/')
 def index():
-    return render_template('index.html')
+    return APP.send_static_file('index.html')
+    #return render_template('index.html')
 
 def gen():
     while True:

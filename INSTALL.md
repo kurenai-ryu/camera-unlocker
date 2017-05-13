@@ -94,40 +94,40 @@
  ```sh
   sudo adduser reco
  ```
- 1. No olvide colocar una contraseña a este nuevo usuario.
+1.  No olvide colocar una contraseña a este nuevo usuario.
 
-11. Agregue este usuario a los grupos `sudo`, `video`, `gpio` y `dialout`:
-
-     ```sh
-     sudo adduser reco sudo
-     sudo adduser reco dialout
-     sudo adduser reco video
-     sudo adduser reco gpio
-     ```
-
-12. cambie el inicio de LightDM para que use el nuevo usuario.
+2. Agregue este usuario a los grupos `sudo`, `video`, `gpio` y `dialout`:
 
     ```sh
-    sudo sed -i "s|autologin-user=pi|autologin-user=reco|g" /etc/lightdm/lightdm.conf
+    sudo adduser reco sudo
+    sudo adduser reco dialout
+    sudo adduser reco video
+    sudo adduser reco gpio
     ```
 
-13. en este punto reinicie e ingrese con el nuevo usuario:
-    ```sh
-        sudo reboot #de la otra sesion
-        ssh reco@192.168.1.100 #ingrese nuevamente
-    ```
-    > recuerde reiniciar y no solamente reingresar por SSH
+3. cambie el inicio de LightDM para que use el nuevo usuario.
 
-14. verifique que el sistema esté en hora.
+   ```sh
+   sudo sed -i "s|autologin-user=pi|autologin-user=reco|g" /etc/lightdm/lightdm.conf
+   ```
 
-    ```sh
-        date
-    ```
-    si no está en hora, verifique que se encuentra habilitado la sincronización mediante NTP.
-    ```sh
-        sudo timedatectl
-        sudo timedatectl set-ntp 1
-    ```
+4. en este punto reinicie e ingrese con el nuevo usuario:
+   ```sh
+       sudo reboot #de la otra sesion
+       ssh reco@192.168.1.100 #ingrese nuevamente
+   ```
+   > recuerde reiniciar y no solamente reingresar por SSH
+
+5. verifique que el sistema esté en hora.
+
+   ```sh
+       date
+   ```
+   si no está en hora, verifique que se encuentra habilitado la sincronización mediante NTP.
+   ```sh
+       sudo timedatectl
+       sudo timedatectl set-ntp 1
+   ```
 
 la diferencia de hora aceptable es de unos cuantos segundos, en caso de no sincronizar, configure el demonio ntpd o instale `ntpdate`
 
@@ -147,7 +147,7 @@ la diferencia de hora aceptable es de unos cuantos segundos, en caso de no sincr
 
 ## Descargar repositorio
 
-1. cree una carpeta donde se realizará la instalación. por ejemplo para instalar en `/opt/sensores`
+1. cree una carpeta donde se realizará la instalación. por ejemplo para instalar en `/opt/unlocker`
 
 ```sh
 export USUARIO=$(whoami)
@@ -164,15 +164,108 @@ git clone --branch master https://github.com/kurenai-ryu/camera-unlocker /opt/un
 #aqui les pedirán sus credenciales de github
 cd /opt/unlocker
 ```
-3.
-
-En caso de descargar el codigo mediante ZIP (sin usar `git clone`),
-vuelva ejecutables los scripts de instalación
+3. En caso de descargar el codigo mediante ZIP (sin usar `git clone`), vuelva ejecutables los scripts de instalación
 
 ```sh
 chmod +x install/*.sh
 ```
 
+4. Cree un archivo de configuración en la carpeta `config` llamado `config/envvars.sh`, puede copiar la muestra de la misma carpeta `config/envvars.sh.ejemplo`
+5. modifique los parámetros básicos del archivo:
+   * PGHOST nombre del servidor de base de datos, normalmente `localhost`.
+   * PGPORT puerto del servidor de base de datos, normalmente 5432
+   * PGDATABASE nombre de la base de datos.
+   * PGUSER nombre del usuario con acceso a la base de datos.
+   * PGPASSWORD contraseña del usuario.
+   * HOSTADRR dirección de referencia de la aplicación
+   * HOSTPORT puerto donde se levantará la aplicación, inicialmente 5000.
+
+### Instalación de requisitos.
+
+Regrese a la carpeta de instalación
+
+```sh
+cd /opt/unlocker
+```
+
+Para la instalación de requisitos, puede ejecutar el script de instalación de requisitos.
+
+```sh
+install/instalar_requerimientos.sh
+```
+
+lo que  instala las librerías necesarias en el rasp berry pi
 
 
+
+posteriormente, si no dispone de una base de datos, puede instalar una en el raspberry con el script
+
+```sh
+install/instalar_postgres.sh
+```
+
+este script, utiliza la información de `envvars.sh` para crear una base de datos, acorde a lo necesario.
+
+FALTA: instalar `bower` y ejecutar `bower install` en `src/www/`
+
+### Prueba del sistema
+
+se recomienda antes de finalizar la instalación, probar la correcta ejecución de la aplicación.
+
+por lo cual se debe cargar las variables de entorno e iniciar la aplicación `src/app.py`
+
+```sh
+cd /opt/unlocker
+source config.ennvars.sh
+python src/app.py
+```
+
+lo cual mostrará la información de ejecución en pantalla hasta que encuentre el mensaje 
+
+```sh
+INFO -  * Running on http://0.0.0.0:5000/
+```
+
+en este momento puede ingresar a la dirección del raspberry, por ejemplo
+
+```
+http://192.168.1.100:5000/
+```
+
+y debe cargar una pequeña pagina de prueba.
+
+
+
+aproveche para crear un nuevo usuario, y tomar fotos del mismo. (verifique el correcto funcionamiento de la camara) y ajuste el brillo y contraste si fuera necesario.
+
+pruebe el sistema haciendo clic en `buscar` y verifique la correcta identificación del rostro.
+
+> En caso de detectar falso positivos. modifique el archivo `config.py`  y reduzca el valor de `POSITIVE_THRESHOLD` 
+
+Recurerde finalizar la aplicación ejecutando en otra terminal `killall python`
+
+### Instalación de Servicio
+
+Luego de tener resultados aceptables en la prueba en la carpeta de la aplicación, ejecute el instalador de servicio
+
+```sh
+cd /opt/unlocker
+install/instalar_servicio_systemd.sh
+```
+
+lo cual creará un script de arranque en `bin/` un servicio en SystemD denominado `unlocker`, de esta forma la aplicación se iniciará al encenderse el raspberry.
+
+* Para reiniciar la aplicación, ejecute el comando
+
+  ```sh
+  sudo systemctl restart unlocker
+  ```
+
+* Para ver el log de estado ejecute
+
+  ```sh
+  journalctl -o cat -f -n -u unlocker
+  ```
+
+  (probablemente la primera vez requiera sudo para ver el `journalctl`)
 

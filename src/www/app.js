@@ -1,4 +1,5 @@
 function poblarUsuarios(){
+  var empezando=True
   $.get("/personal").then(function(personal){
     if (personal.length) $("#usuarios").empty();
     personal.forEach(function(p){
@@ -14,16 +15,20 @@ function poblarUsuarios(){
           </div>
         </div>
       `); //<a class="btn" id="reg_${p.id}">Borrar Fotos</a>
-      $(`#del_${p.id}`).off('click').click(function(){
-        $.ajax({
-          url: `/personal/${p.id}`,
-          type: 'DELETE',
-          success: function(result) {
-              // Do something with the result
-              poblarUsuarios(); //reload
-          }
-        });
-      })
+      if (empezando){
+        $(`#del_${p.id}`).remove();
+      } else {
+        $(`#del_${p.id}`).off('click').click(function(){
+          $.ajax({
+            url: `/personal/${p.id}`,
+            type: 'DELETE',
+            success: function(result) {
+                // Do something with the result
+                poblarUsuarios(); //reload
+            }
+          });
+        });        
+      }
       $(`#reg_${p.id}`).off('click').click(function(){
         //estará ocupado?
         //mostrar modal stream!
@@ -84,6 +89,13 @@ function poblarUsuarios(){
     });
   });
 }
+/*
+function confirm(text){
+  $("#confirmText").text(text);
+  $("#confirmModal").modal('open');
+
+}*/
+
 
 jQuery(function($){ //dom ready
   moment.locale('es');
@@ -94,7 +106,7 @@ jQuery(function($){ //dom ready
   });
   $("#modalCrear").modal({});
   $("#modalUsuario").modal({});
-  $("#modalStream").modal({});
+  $("#modalStream").modal({dismissible: false,});
   $(".button-collapse").sideNav();
   poblarUsuarios();
   $(".btnCrear").click(function(){
